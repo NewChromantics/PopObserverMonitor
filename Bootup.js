@@ -399,8 +399,12 @@ function OnExposeImage(Message)
 		MirrorImage = new Pop.Image();
 	}
 	MirrorKb.Add(Message.length);
-	MirrorImage.LoadPng(Message);
-	MirrorCounter.Add();
+	
+	function OnWrittenImage()
+	{
+		MirrorCounter.Add();
+	}
+	MirrorImage.LoadPng(Message).then(OnWrittenImage);
 }
 
 function OnExposeMessage(Message)
