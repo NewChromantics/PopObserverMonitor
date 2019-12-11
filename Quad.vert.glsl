@@ -1,6 +1,7 @@
 uniform vec4 VertexRect;// = vec4(0,0,1,1);
 in vec2 TexCoord;
 out vec2 uv;
+out float3 FragColour;
 
 
 void main()
@@ -21,5 +22,6 @@ void main()
 	gl_Position.y = mix( t, b, TexCoord.y );
 	
 	uv = vec2( TexCoord.x, TexCoord.y );
+	FragColour = float3( TexCoord, 0 );
 }
 

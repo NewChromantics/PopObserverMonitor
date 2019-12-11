@@ -15,17 +15,19 @@ SetGlobal.call(this);
 
 const GeoTextureShader = RegisterShaderAssetFilename('Texture.frag.glsl','Geo.vert.glsl');
 const GeoColourShader = RegisterShaderAssetFilename('Colour.frag.glsl','Geo.vert.glsl');
+const QuadTextureShader = RegisterShaderAssetFilename('Texture.frag.glsl','Quad.vert.glsl');
 const SceneFilename = 'Assets/parallax_test_02.obj';
 const SceneTextureFilename = '2cats.png';
 
 Pop.AsyncCacheAssetAsString('Texture.frag.glsl');
 Pop.AsyncCacheAssetAsString('Colour.frag.glsl');
 Pop.AsyncCacheAssetAsString('Geo.vert.glsl');
+Pop.AsyncCacheAssetAsString('Quad.vert.glsl');
 Pop.AsyncCacheAssetAsImage(SceneTextureFilename);
 Pop.AsyncCacheAssetAsString(SceneFilename);
 
 
-
+let MirrorImage = null;
 
 var Params = {};
 function OnParamsChanged()
@@ -44,7 +46,7 @@ Params.BrightnessMult = 1.8;
 Params.HeightMapStepBack = 0.30;
 Params.GeoColour = [0,0,1];
 Params.BackgroundColour = [0,0,0];
-Params.GeoColour = [0,0,1];
+Params.GeoColour = [0,1,1];
 Params.GeoScale = 0.1;
 Params.SceneScale = 0.1;
 Params.GeoYaw = 90;
@@ -214,7 +216,7 @@ function RenderScene(RenderTarget)
 		Shader.SetUniform('WorldToCameraTransform',WorldToCameraTransform);
 		Shader.SetUniform('CameraProjectionTransform',CameraProjectionTransform);
 		Shader.SetUniform('Colour',Colour);
-		Shader.SetUniform('CarTexture',SceneTexture);
+		Shader.SetUniform('Texture',SceneTexture);
 	}
 	function RenderGeo(Geo)
 	{
@@ -256,9 +258,32 @@ function RenderPoses(RenderTarget,Poses)
 	Poses.forEach( RenderPose );
 }
 
+function RenderTexture(RenderTarget,Texture,Rect)
+{
+	const Quad = GetAsset('Quad',RenderTarget);
+	const Shader = GetAsset(QuadTextureShader,RenderTarget);
+	
+	function SetUniforms(Shader)
+	{
+		Shader.SetUniform('VertexRect', Rect);
+		Shader.SetUniform('Texture', Texture);
+	}
+	
+	RenderTarget.DrawGeometry( Quad, Shader, SetUniforms );
+}
+
 function Render(RenderTarget)
 {
 	RenderTarget.ClearColour( ...Params.BackgroundColour );
+	
+	
+	//	clear to frame
+	if ( MirrorImage )
+	{
+		RenderTexture( RenderTarget, MirrorImage, [0,0,1,1] );
+		RenderTarget.ClearDepth();
+	}
+	
 	
 	let MoonColour = SceneTexture;
 	
@@ -313,6 +338,8 @@ const Window = new Pop.Opengl.Window("Lunar");
 
 const FpsCounter = new Pop.FrameCounter("fps");
 const PoseCounter = new Pop.FrameCounter("Poses");
+const MirrorCounter = new Pop.FrameCounter("Mirror");
+const MirrorKb = new Pop.FrameCounter("Mirror Kb");
 
 Window.OnRender = function(RenderTarget)
 {
@@ -363,8 +390,28 @@ Window.OnMouseScroll = function(x,y,Button,Delta)
 }
 
 
+function OnExposeImage(Message)
+{
+	//	work out if it's H264, or png etc
+	//	lets assume png for now
+	if ( !MirrorImage )
+	{
+		MirrorImage = new Pop.Image();
+	}
+	MirrorKb.Add(Message.length);
+	MirrorImage.LoadPng(Message);
+	MirrorCounter.Add();
+}
+
 function OnExposeMessage(Message)
 {
+	//	handle binary messages (images)
+	if ( Message instanceof Uint8Array )
+	{
+		OnExposeImage(Message);
+		return;
+	}
+	
 	const PoseStates = JSON.parse(Message);
 	PoseCounter.Add();
 	
