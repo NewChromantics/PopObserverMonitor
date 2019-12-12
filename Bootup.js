@@ -15,6 +15,7 @@ SetGlobal.call(this);
 
 const GeoTextureShader = RegisterShaderAssetFilename('Texture.frag.glsl','Geo.vert.glsl');
 const GeoColourShader = RegisterShaderAssetFilename('Colour.frag.glsl','Geo.vert.glsl');
+const CameraFrustumShader = RegisterShaderAssetFilename('CameraFrustum.frag.glsl','Geo.vert.glsl');
 const QuadTextureShader = RegisterShaderAssetFilename('Texture.frag.glsl','Quad.vert.glsl');
 const SceneFilename = 'Assets/parallax_test_02.obj';
 const SceneTextureFilename = '2cats.png';
@@ -23,30 +24,25 @@ Pop.AsyncCacheAssetAsString('Texture.frag.glsl');
 Pop.AsyncCacheAssetAsString('Colour.frag.glsl');
 Pop.AsyncCacheAssetAsString('Geo.vert.glsl');
 Pop.AsyncCacheAssetAsString('Quad.vert.glsl');
+Pop.AsyncCacheAssetAsString('CameraFrustum.frag.glsl');
 Pop.AsyncCacheAssetAsImage(SceneTextureFilename);
 Pop.AsyncCacheAssetAsString(SceneFilename);
 
 
 let MirrorImage = null;
+let MirrorCamera = new Pop.Camera();	//	camera calculated from poses
+
 
 var Params = {};
 function OnParamsChanged()
 {
 	
 }
-Params.SquareStep = true;
-Params.DrawColour = true;
-Params.DrawHeight = true;
-Params.BigImage = false;
-Params.DrawStepHeat = false;
-Params.TerrainHeightScalar = 5.70;
-Params.PositionToHeightmapScale = 0.009;
 Params.Fov = 52;
-Params.BrightnessMult = 1.8;
-Params.HeightMapStepBack = 0.30;
 Params.GeoColour = [0,0,1];
+Params.CameraColour = [0,1,0];
 Params.BackgroundColour = [0,0,0];
-Params.GeoColour = [0,1,1];
+Params.GeoColour = [1,0,1];
 Params.GeoScale = 0.1;
 Params.SceneScale = 0.1;
 Params.GeoYaw = 90;
@@ -55,12 +51,21 @@ Params.GeoY = -2;
 Params.GeoZ = 0;
 Params.RenderScene = false;
 
+Params.MirrorFov = 50;
+Params.MirrorFar = 10;
+Params.MirrorNear = 0.1;
+
 const ParamsWindowRect = [1200,20,350,200];
 var ParamsWindow = new CreateParamsWindow(Params,OnParamsChanged,ParamsWindowRect);
+
+ParamsWindow.AddParam('MirrorFov',10,90);
+ParamsWindow.AddParam('MirrorFar',0.001,100);
+ParamsWindow.AddParam('MirrorNear',0.001,100);
+
+
 ParamsWindow.AddParam('Fov',10,90);
-ParamsWindow.AddParam('BrightnessMult',0,3);
-ParamsWindow.AddParam('HeightMapStepBack',0,1);
 ParamsWindow.AddParam('GeoColour','Colour');
+ParamsWindow.AddParam('CameraColour','Colour');
 ParamsWindow.AddParam('BackgroundColour','Colour');
 ParamsWindow.AddParam('GeoScale',0.001,10);
 ParamsWindow.AddParam('SceneScale',0.001,10);
@@ -226,9 +231,8 @@ function RenderScene(RenderTarget)
 	
 }
 
-function RenderPoses(RenderTarget,Poses)
+function RenderPoses(RenderTarget,Poses,Camera)
 {
-	const Camera = MoonApp.Camera;
 	const Geo = GetAsset( 'Cube', RenderTarget );
 	const Colour = Params.GeoColour;
 	
@@ -240,7 +244,7 @@ function RenderPoses(RenderTarget,Poses)
 	
 	function RenderPose(Pose)
 	{
-		const PoseMatrix = Pose.LocalToWorldTransform;
+		const PoseMatrix = Pose.LocalToWorld;
 		//const PoseMatrix = Math.CreateTranslationMatrix(0,0,0);
 		const ScaleMatrix = Math.CreateScaleMatrix( Params.GeoScale );
 		const LocalToWorldTransform = Math.MatrixMultiply4x4( PoseMatrix, ScaleMatrix );
@@ -272,6 +276,65 @@ function RenderTexture(RenderTarget,Texture,Rect)
 	RenderTarget.DrawGeometry( Quad, Shader, SetUniforms );
 }
 
+function UpdateMirrorCamera()
+{
+	//	grab eye pose to get position, rotation
+	MirrorCamera.FovVertical = Params.MirrorFov;
+	MirrorCamera.NearDistance = Params.MirrorNear;
+	MirrorCamera.FarDistance = Params.MirrorFar;
+	
+	function MatchEyePose(Pose)
+	{
+		return Pose.Class == "TrackedDeviceClass_HMD";
+	}
+	const EyePoses = LastPoses.filter(MatchEyePose);
+	if ( !EyePoses.length )
+	{
+		Pop.Debug("Didn't find hmd pose", JSON.stringify(LastPoses) );
+		return;
+	}
+
+	const Pose = EyePoses[0];
+	//	get pos, get rotation
+	MirrorCamera.Position = Math.GetMatrixTranslation(Pose.LocalToWorld);
+	MirrorCamera.Rotation4x4 = Pose.LocalToWorld.slice();
+	//	remove pos from rotation matrix
+	Math.SetMatrixTranslation( MirrorCamera.Rotation4x4, 0,0,0 );
+}
+
+function RenderCameraDebug(RenderTarget,RenderCamera,DebugCamera)
+{
+	const Geo = GetAsset( 'Cube', RenderTarget );
+	const Colour = Params.CameraColour;
+	
+	const Shader = GetAsset( CameraFrustumShader, RenderTarget );
+	
+	const WorldToCameraTransform = RenderCamera.GetWorldToCameraMatrix();
+	const ViewRect = RenderTarget.GetRenderTargetRect();//[-1,-1,1,1];
+	const CameraProjectionTransform = RenderCamera.GetProjectionMatrix(ViewRect);
+	
+	const DebugViewRect = [-1,-1,1,1];
+	const LocalToWorldTransform = DebugCamera.GetLocalToWorldFrustumTransformMatrix(DebugViewRect);
+	
+	function SetUniforms(Shader)
+	{
+		Shader.SetUniform('LocalToWorldTransform',LocalToWorldTransform);
+		Shader.SetUniform('WorldToCameraTransform',WorldToCameraTransform);
+		Shader.SetUniform('CameraProjectionTransform',CameraProjectionTransform);
+		Shader.SetUniform('Colour',Colour);
+	}
+	RenderTarget.DrawGeometry( Geo, Shader, SetUniforms );
+}
+
+function RenderMirrorView(RenderTarget,Camera)
+{
+	//	render the mirror frustum
+	RenderCameraDebug( RenderTarget, Camera, MirrorCamera );
+	
+	//	render some geo and project the mirror camera onto it
+}
+
+
 function Render(RenderTarget)
 {
 	RenderTarget.ClearColour( ...Params.BackgroundColour );
@@ -293,7 +356,11 @@ function Render(RenderTarget)
 	if ( Params.RenderScene )
 		RenderScene( RenderTarget );
 	
-	RenderPoses( RenderTarget, LastPoses );
+	RenderPoses( RenderTarget, LastPoses, Camera );
+	
+	//	render the mirror sphere
+	UpdateMirrorCamera();
+	RenderMirrorView( RenderTarget, Camera );
 	
 	/*
 	
@@ -422,15 +489,7 @@ function OnExposeMessage(Message)
 	const Poses = PoseStates.Devices;
 	//Pop.Debug( "OnExposeMessage", Poses );
 	
-	function CleanPose(Pose)
-	{
-		const Matrix = Pose.LocalToWorld;
-		//Pop.Debug("Matrix",Matrix);
-		Pose.LocalToWorldTransform = Matrix;
-		return Pose;
-	}
-	
-	LastPoses = Poses.map( CleanPose );
+	LastPoses = Poses;
 }
 
 function GetWelcomeMessage()
@@ -440,7 +499,7 @@ function GetWelcomeMessage()
 	return JSON.stringify(Welcome);
 }
 
-const ServerHostnames = ['desktop-ln26a9s.local','localhost'];
+const ServerHostnames = ['192.168.0.27','desktop-ln26a9s.local','localhost'];
 const ServerPorts = [9002,9002,9003,9001];
 
 async function SocketLoop(ServerAddress,OnMessage,GetWelcomeMessage)
