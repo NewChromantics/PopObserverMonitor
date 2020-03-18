@@ -332,6 +332,32 @@ function RenderMirrorView(RenderTarget,Camera)
 	RenderCameraDebug( RenderTarget, Camera, MirrorCamera );
 	
 	//	render some geo and project the mirror camera onto it
+	RenderProjection( RenderTarget, Camera, MirrorCamera );
+}
+
+function RenderProjection(RenderTarget,RenderCamera,DebugCamera)
+{
+	//	render a cube around the camera,
+	//	and use a shader which sample the projected texture
+	const Geo = GetAsset( 'Cube', RenderTarget );
+	
+	const Shader = GetAsset( ProjectionShader, RenderTarget );
+	
+	const WorldToCameraTransform = RenderCamera.GetWorldToCameraMatrix();
+	const ViewRect = RenderTarget.GetRenderTargetRect();//[-1,-1,1,1];
+	const CameraProjectionTransform = RenderCamera.GetProjectionMatrix(ViewRect);
+	
+	const DebugViewRect = [-1,-1,1,1];
+	const LocalToWorldTransform = DebugCamera.GetLocalToWorldFrustumTransformMatrix(DebugViewRect);
+	
+	function SetUniforms(Shader)
+	{
+		Shader.SetUniform('LocalToWorldTransform',LocalToWorldTransform);
+		Shader.SetUniform('WorldToCameraTransform',WorldToCameraTransform);
+		Shader.SetUniform('CameraProjectionTransform',CameraProjectionTransform);
+		Shader.SetUniform('Colour',Colour);
+	}
+	RenderTarget.DrawGeometry( Geo, Shader, SetUniforms );
 }
 
 
